@@ -13,7 +13,6 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.populate_comboboxes()
         self.load_files()
-        #self.load_keys()
         
     def setup_ui(self):
         self.file_path = ""
@@ -29,7 +28,6 @@ class MainWindow(QMainWindow):
         # Fisiere
         self.files_list = QListWidget()
         self.files_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.files_list.currentItemChanged.connect(self.on_file_selected)
 
         # Restul interfeței
         self.algorithm_combo = QComboBox()
@@ -55,6 +53,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("Alege algoritm:"))
         layout.addWidget(self.algorithm_combo)
+        self.algorithm_combo.currentIndexChanged.connect(self.on_algorithm_selected)
         
         layout.addWidget(QLabel("Alege cheia:"))
         layout.addWidget(self.key_combo)
@@ -111,8 +110,6 @@ class MainWindow(QMainWindow):
             self.decrypt_file()
         else:
             QMessageBox.warning(self, "Atentie", "Selecteaza tipul operatiei.")
-            
-        self.load_keys()
          
     def populate_comboboxes(self):
         session = Session()
@@ -143,10 +140,10 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, file.id)
             self.files_list.addItem(item)
 
-    def load_keys(self, file_id):
+    def load_keys(self, algorithm_id):
         self.key_combo.clear()
         session = Session()
-        keys = session.query(CryptoKeys).filter(CryptoKeys.file_id == file_id).all()
+        keys = session.query(CryptoKeys).filter(CryptoKeys.algorithm_id == algorithm_id).all()
         for key in keys:
             self.key_combo.addItem(f"Cheie #{key.id}", userData=key.id)
         session.close()     
@@ -159,13 +156,25 @@ class MainWindow(QMainWindow):
             
         session = Session()
         
+        key_bytes = os.urandom(32)
+        encoded_key = base64.b64encode(key_bytes).decode()
         
+        new_key = CryptoKeys(
+            value = encoded_key,
+            algorithm_id = algorithm_id
+        )
+        
+        session.add(new_key)
+        session.commit()
+        session.close()
+        
+        self.load_keys(algorithm_id)
 
     
-    def on_file_selected(self, current, previous):
-        if current:
-            file_id = current.data(Qt.ItemDataRole.UserRole)
-            self.load_keys(file_id)
+    def on_algorithm_selected(self):
+        algorithm_id = self.algorithm_combo.currentData()
+        if algorithm_id:
+            self.load_keys(algorithm_id)
             
     def encrypt_file(self):
         selected_item = self.files_list.currentItem()
@@ -174,8 +183,8 @@ class MainWindow(QMainWindow):
             return
 
         file_id = selected_item.data(Qt.ItemDataRole.UserRole)
+        
         key_id = self.key_combo.currentData()
-
         if key_id is None:
             QMessageBox.warning(self, "Eroare", "Selecteaza o cheie pentru criptare.")
             return
@@ -246,7 +255,7 @@ class MainWindow(QMainWindow):
         key_id = self.key_combo.currentData()
 
         if key_id is None:
-            QMessageBox.warning(self, "Eroare", "Selecteaza o cheie pentru criptare.")
+            QMessageBox.warning(self, "Eroare", "Selecteaza o cheie pentru decriptare.")
             return
 
         session = Session()
@@ -259,11 +268,13 @@ class MainWindow(QMainWindow):
             return
 
         input_path = file.file_path
+        if not input_path.endswith(".enc"):
+            QMessageBox.warning(self, "Eroare", "Fisierul selectat nu este criptat (.enc).")
+            return
+
         filename = os.path.basename(input_path).replace(".enc", "")
-        
         output_dir = "decrypted_files"
         os.makedirs(output_dir, exist_ok=True)
-        
         output_path = os.path.join(output_dir, filename)
 
         # Decodificare cheie
@@ -274,21 +285,22 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Eroare", f"Cheia nu poate fi decodificata:\n{e}")
             return
 
+        # IV-ul trebuie sa fie acelasi ca la criptare!
         iv_hex = "00000000000000000000000000000000"
 
         try:
-            # comanda openssl
             result = subprocess.run([
                 "openssl", "enc", "-aes-256-cbc", "-d",
                 "-in", input_path,
                 "-out", output_path,
                 "-K", key_hex,
                 "-iv", iv_hex
-        ])
+            ], capture_output=True, text=True)
 
             if result.returncode != 0:
-                raise Exception(result.stderr)
+                raise Exception(result.stderr.strip())
 
+            # Salvare in DB
             session = Session()
             decrypted_file = Files(
                 original_name=os.path.basename(output_path),
@@ -303,4 +315,5 @@ class MainWindow(QMainWindow):
             self.load_files()
 
         except Exception as e:
-            QMessageBox.critical(self, "Eroare", f"Criptarea a esuat:\n{e}")
+            QMessageBox.critical(self, "Eroare", f"Decriptarea a esuat:\n{e}")
+
