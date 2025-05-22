@@ -4,6 +4,9 @@ from db.db_manager import Session, Algorithms, Frameworks, Files, CryptoKeys
 import os
 import base64
 import subprocess
+from utils.style_loader import load_style
+from sqlalchemy import case
+from utils.enums import FileStatus
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -11,6 +14,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Sistem de criptare fisiere")
         
         self.setup_ui()
+        load_style(self)
         self.populate_comboboxes()
         self.load_files()
         
@@ -128,7 +132,16 @@ class MainWindow(QMainWindow):
         self.files_list.clear()
         
         session = Session()
-        files = session.query(Files).all()
+        
+        status_order = case(
+            (Files.status == "original", 0),
+            (Files.status == "encrypted", 1),
+            (Files.status == "decrypted", 2),
+            else_=99
+        )
+
+        files = session.query(Files).order_by(status_order, Files.upload_date.desc()).all()
+        
         session.close()
 
         for file in files:
@@ -193,14 +206,18 @@ class MainWindow(QMainWindow):
         file = session.query(Files).filter(Files.id == file_id).first()
         key = session.query(CryptoKeys).filter(CryptoKeys.id == key_id).first()
         session.close()
-
+        
         if not file or not key:
             QMessageBox.critical(self, "Eroare", "Fisierul sau cheia nu au putut fi incarcate.")
+            return
+        
+        if file.status != FileStatus.original:
+            QMessageBox.warning(self, "Atentie", "Doar fisiere cu status 'original' pot fi criptate.")
             return
 
         input_path = file.file_path
         
-        output_dir = "encrypted_files"
+        output_dir = "/home/david/Proiecte/crypto-manager/encrypted_files"
         os.makedirs(output_dir, exist_ok=True)
         
         filename = os.path.basename(input_path)
@@ -273,7 +290,7 @@ class MainWindow(QMainWindow):
             return
 
         filename = os.path.basename(input_path).replace(".enc", "")
-        output_dir = "decrypted_files"
+        output_dir = "/home/david/Proiecte/crypto-manager/decrypted_files"
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, filename)
 
@@ -285,7 +302,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Eroare", f"Cheia nu poate fi decodificata:\n{e}")
             return
 
-        # IV-ul trebuie sa fie acelasi ca la criptare!
         iv_hex = "00000000000000000000000000000000"
 
         try:
@@ -298,7 +314,8 @@ class MainWindow(QMainWindow):
             ], capture_output=True, text=True)
 
             if result.returncode != 0:
-                raise Exception(result.stderr.strip())
+                # raise Exception(result.stderr.strip())
+                raise Exception("Eroare")
 
             # Salvare in DB
             session = Session()
