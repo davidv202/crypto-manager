@@ -1,8 +1,10 @@
-from sqlalchemy import create_engine, Column, Integer, String, Enum, ForeignKey, Text, TIMESTAMP
+from datetime import datetime
+
+from sqlalchemy import create_engine, Column, Integer, String, Enum, ForeignKey, Text, TIMESTAMP, Float, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.sql import func
-from utils.enums import AlgorithmType, FileStatus
+from app.utils.enums import AlgorithmType, FileStatus
 
 DATABASE_URL = "mysql+pymysql://admin:admin@localhost:3306/crypto"
 
@@ -29,6 +31,7 @@ class CryptoKeys(Base):
     id = Column(Integer, primary_key=True)
     value = Column(Text, nullable=False)
     algorithm_id = Column(Integer, ForeignKey("Algorithms.id"), nullable=False)
+    key_type = Column(String, nullable=True)
     
     algorithm = relationship("Algorithms")
 
@@ -40,6 +43,18 @@ class Files(Base):
     file_path = Column(Text, nullable=False)
     status = Column(Enum(FileStatus), nullable=False, default=FileStatus.original)
     upload_date = Column(TIMESTAMP, server_default=func.now())
+
+class Benchmark(Base):
+    __tablename__ = "benchmarks"
+
+    id = Column(Integer, primary_key=True)
+    algorithm = Column(String(50))
+    framework = Column(String(50))
+    operation = Column(String(20))
+    time_ms = Column(Float)
+    memory_kb = Column(Float)
+    file_size_bytes = Column(Integer)
+    timestamp = Column(DateTime, default=datetime.now)
     
 def init_db():
     Base.metadata.create_all(engine)
